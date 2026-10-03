@@ -7,6 +7,7 @@ import pandas as pd
 from territorial_inteligence_methodology.bronze.config import Config
 from territorial_inteligence_methodology.utils.databricks_client import DataBricksClient
 from territorial_inteligence_methodology.utils.sql_executor import SqlExecutor
+from territorial_inteligence_methodology.utils.domains import COLUMNS_MAPPING
 
 
 class DataLoader:
@@ -92,7 +93,17 @@ class DataLoader:
         else:
             raise ValueError(f"Unsupported file format: {file_path.suffix}")
 
-        df.columns = [self.normalize_column_name(col) for col in df.columns]
+        new_columns=[]
+        for col in df.columns:
+            if col in COLUMNS_MAPPING:
+                new_columns.append(COLUMNS_MAPPING[col])
+            else:
+                new_columns.append(self.normalize_column_name(col))
+        df.columns=new_columns
+
+        if parquet_path.exists():
+            parquet_path.unlink()
+            
         df.to_parquet(parquet_path, index=False)
         print(f"  Saved as {parquet_path.name} with columns: {list(df.columns)}")
         return parquet_path

@@ -13,7 +13,10 @@ class SilverEncoder:
         self.SCHEMA =self.config.SCHEMA
         self.TABLE_BRONCE_NAME =self.config.TABLE_BRONZE_NAME
         self.TABLE_SILVER_NAME =self.config.TABLE_SILVER_NAME
+        self.consolidado =self.config.CONSOLIDATED_TABLE_NAME
+        
 
+    
     def generate_silver_table(self):
         source_table =f"{self.CATALOG}.{self.SCHEMA}.{self.TABLE_BRONCE_NAME}"
         silver_table =f"{self.config.CATALOG}.{self.config.SCHEMA}.{self.config.TABLE_SILVER_NAME}"
@@ -26,7 +29,7 @@ class SilverEncoder:
             SELECT 
                             municipio,
                             departamento,
-                            LEFT(codigo_dane, LEN(codigo_dane) - 3) as codigo_dane,
+                            LPAD(LEFT(codigo_dane, LENGTH(codigo_dane) - 3), 5, '0') as codigo_dane,
                             mes,
                             anio,
                             SUM(cantidad) as total_tematica,
@@ -49,7 +52,8 @@ class SilverEncoder:
                             SUM(CASE WHEN dia = 'sáb.' THEN cantidad ELSE 0 END) as tematica_sabado,
                             SUM(CASE WHEN dia = 'dom.' THEN cantidad ELSE 0 END) as tematica_domingo
                         FROM {source_table}
-                        GROUP BY municipio, codigo_dane,departamento, mes, anio
+                        WHERE municipio <> '-'
+                        GROUP BY 1,2,3,4,5
                         ),
                         temporal_metrics as (
                         SELECT 
@@ -206,6 +210,8 @@ class SilverEncoder:
                                         ORDER BY municipio, anio, mes
         """
 
+            
+
         print(f"Creating silver table {silver_table}...")
         self.sql_executor.execute_sql_query(
             self.config.CATALOG,
@@ -213,7 +219,7 @@ class SilverEncoder:
             query
         )
         
-
+    
     def validate_silver_table(self):
         table_name = f"{self.config.CATALOG}.{self.config.SCHEMA}.{self.config.TABLE_SILVER_NAME}"
         query = f"SELECT COUNT(*) AS total_rows FROM {table_name}"
@@ -233,6 +239,7 @@ class SilverEncoder:
         print("=" * 50)
 
         self.generate_silver_table()
+
 
         print("=" * 50)
         print("SILVER LAYER - SILVER TABLE GENERATED")

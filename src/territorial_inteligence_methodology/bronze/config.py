@@ -22,6 +22,8 @@ class Config:
         self.TABLE_BRONZE_NAME = self._get_env('BRONZE_TABLE_NAME', 'hurto_personas_bronce')
         self.TABLE_SILVER_NAME = self._get_env('SILVER_TABLE_NAME', 'hurto_personas_silver')
         self.FILE_NAME = self._get_env('FILE_NAME', 'dataset_hurto_personas.parquet')
+        self.PREDICTION_TABLE_NAME = self._get_env('PREDICTION_TABLE_NAME', 'hurto_personas_prediccion')
+        self.CONSOLIDATED_TABLE_NAME = self._get_env('CONSOLIDATED_TABLE_NAME', 'consolidado')
         
         # Configuración APIs
         

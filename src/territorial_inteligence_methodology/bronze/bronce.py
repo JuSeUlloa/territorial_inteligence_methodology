@@ -1,26 +1,10 @@
 from territorial_inteligence_methodology.utils.databricks_client import DataBricksClient
 from territorial_inteligence_methodology.utils.sql_executor import SqlExecutor
 from territorial_inteligence_methodology.bronze.config import Config
+from territorial_inteligence_methodology.utils.domains import FIELDS_NOT_ENCODED, FIELDS_TO_ENCODE, MONTH_MAPPING
 
 
 class BronzeEncoder:
-    FIELDS_TO_ENCODE = ['genero', 'zona', 'armas_medios', 'agrupa_edad']
-    FIELDS_NOT_ENCODED = ['tematica', 'anio', 'departamento', 'codigo_dane', 'municipio', 'clase_sitio', 'dia', 'cantidad']
-
-    MONTH_MAPPING = {
-        'Enero': 1,
-        'Febrero': 2,
-        'Marzo': 3,
-        'Abril': 4,
-        'Mayo': 5,
-        'Junio': 6,
-        'Julio': 7,
-        'Agosto': 8,
-        'Septiembre': 9,
-        'Octubre': 10,
-        'Noviembre': 11,
-        'Diciembre': 12
-    }
 
     def __init__(self):
         self.client = DataBricksClient().get_client()
@@ -55,15 +39,15 @@ class BronzeEncoder:
 
         select_parts = []
 
-        for field in self.FIELDS_NOT_ENCODED:
+        for field in FIELDS_NOT_ENCODED:
             select_parts.append(field)
 
         print("\nmes mapping:")
-        for value, code in self.MONTH_MAPPING.items():
+        for value, code in MONTH_MAPPING.items():
             print(f"  {value} -> {code}")
-        select_parts.append(self.build_case_statement('mes', self.MONTH_MAPPING))
+        select_parts.append(self.build_case_statement('mes', MONTH_MAPPING))
 
-        for field in self.FIELDS_TO_ENCODE:
+        for field in FIELDS_TO_ENCODE:
             unique_values = self.get_unique_values(source_table, field)
             mapping = self.create_encoding_mapping(unique_values)
             print(f"\n{field} mapping:")
@@ -113,6 +97,3 @@ def encode_bronze_table():
     print("BRONZE ENCODING COMPLETE")
     print("=" * 50)
 
-
-if __name__ == "__main__":
-    encode_bronze_table()

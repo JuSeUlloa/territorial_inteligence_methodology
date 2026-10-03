@@ -16,11 +16,9 @@ class XGBoostModel:
 
    #variables categoticas
     CATEGORICAL_VARS=[
-       'departamento',
        'cluster_rv',
        'cluster_pga',
        'cluster_vs',
-       'pdet_zomac',
        'municipio_isla_area_no_municipalizada', 
     ] 
     
@@ -59,6 +57,7 @@ class XGBoostModel:
         'pob_dane_2025',
         'pdet',
         'zomac',
+        'pdet_zomac',
         'riesgo_victimizacion',
         'pres_grup_armados',
         'victimizacion_seguridad',
@@ -70,8 +69,7 @@ class XGBoostModel:
 
     FEATURES = NUM_VARS_SILVER + NUM_VARS_CONSOLIDATED_DATA + CATEGORICAL_VARS
 
-    SILVER_COLUMNS="""a.municipio, a.codigo_dane, a.departamento, a.mes, a.anio,
-        a.total_tematica, a.tematica_mes_anterior,
+    SILVER_COLUMNS="""a.municipio, a.codigo_dane, a.departamento, a.mes, a.anio, a.tematica_mes_anterior,
         a.media_movil_3_meses, a.media_movil_6_meses, a.tendencia,
         a.crecimiento_intermensual, a.crecimiento_interanual,
         a.max_anio_anterior, a.max_mes_anterior,
@@ -97,10 +95,12 @@ class XGBoostModel:
         self.catalog =self.config.CATALOG
         self.schema =self.config.SCHEMA
         self.table_silver =self.config.TABLE_SILVER_NAME
+        self.prediction_table =self.config.PREDICTION_TABLE_NAME
         self.catalog =self.config.CATALOG
         self.random_state =random_state
         self.model=None
         self.model_dir ='./src/territorial_inteligence_methodology/models'
+        self.train_categories=None
 
     
     def _base_from(self):
@@ -115,15 +115,14 @@ class XGBoostModel:
             SELECT {self.SILVER_COLUMNS}, {self.CONSOLIDATED_DATA_COLUMNS},
                    (a.total_tematica / c.pob_dane_2025) * 100000 AS target
             {self._base_from()}
-            WHERE a.anio IN (2021, 2022, 2023, 2024)
-            ORDER BY a.mes DESC
+            WHERE a.anio BETWEEN 2021 AND 2024
         """
 
     def build_test_query(self):
         return f"""
             SELECT {self.SILVER_COLUMNS}, {self.CONSOLIDATED_DATA_COLUMNS}
             {self._base_from()}
-            WHERE a.anio IN (2025)
+            WHERE a.anio IN (2025,2026)
             ORDER BY a.departamento, a.municipio ASC
         """
 
@@ -136,15 +135,19 @@ class XGBoostModel:
         return self.result_query_df(self.build_train_query())
 
     def load_test_data (self):
-        print(f"Carganddo Datos de prueba periodo 2025 ...")
+        print(f"Carganddo Datos de prueba periodo 2025 y 2026 ...")
         return self.result_query_df(self.build_test_query())
 
-    def prepare_X(self, df):
+    def prepare_X(self, df, categories:None):
         X = df[self.FEATURES].copy()
         for col in self.NUM_VARS_SILVER + self.NUM_VARS_CONSOLIDATED_DATA:
             X[col] = pd.to_numeric(X[col], errors="coerce")
         for col in self.CATEGORICAL_VARS:
-            X[col] = X[col].astype("category")
+            X[col] = X[col].astype(str).astype("category")
+            if categories and col in categories:
+                X[col]=pd.Categorical(X[col], categories=categories[col])
+            else:
+                X[col] = X[col].astype("category") 
         return X
 
     def new_model(self):
@@ -171,7 +174,10 @@ class XGBoostModel:
             return imp
     
     def train(self, df_train):
-        X = self.prepare_X(df_train)
+        X = self.prepare_X(df_train, None)
+        self.train_categories = {
+        col: list(X[col].cat.categories) for col in self.CATEGORICAL_VARS
+        }
         y = pd.to_numeric(df_train["target"], errors="coerce")
 
         # Holdout temporal: 2024 como validacion (metricas honestas)
@@ -202,7 +208,7 @@ class XGBoostModel:
         print(f"  R2  : {r2:.4f}")
 
     def predict(self, df_test):
-        X_test = self.prepare_X(df_test)
+        X_test = self.prepare_X(df_test, categories=self.train_categories)
         preds = self.model.predict(X_test)
         out = df_test[self.VARS_ID].copy()
         out["tasa_predicha"] = np.round(preds, 4)
@@ -224,7 +230,7 @@ class XGBoostModel:
             vals = ", ".join(self._sql_literal(r[c]) for c in cols)
             rows.append(f"({vals})")
         values = ",\n".join(rows)
-        prediction_table = f"{self.catalog}.{self.schema}.hurto_personas_prediccion"
+        prediction_table = f"{self.catalog}.{self.schema}.{self.prediction_table}"
         query = f"""
             CREATE OR REPLACE TABLE {prediction_table} USING DELTA AS
             SELECT * FROM VALUES\n{values}\nAS t({', '.join(cols)})

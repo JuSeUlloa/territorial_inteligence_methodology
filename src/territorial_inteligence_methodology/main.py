@@ -5,6 +5,7 @@ from territorial_inteligence_methodology.bronze.quality import Quality
 from territorial_inteligence_methodology.bronze.bronce import BronzeEncoder
 from territorial_inteligence_methodology.silver.silver import SilverEncoder
 from territorial_inteligence_methodology.models.xgboots_model import XGBoostModel
+from territorial_inteligence_methodology.gold.consolidated import Consolidated
 
 
 def main():
@@ -14,9 +15,9 @@ def main():
     )
     parser.add_argument(
         "--step",
-        choices=["quality", "encode","silver", "model" "all"],
+        choices=["quality", "encode","silver", "model", "consolidated", "all"],
         default="all",
-        help="Step to execute: quality, encode, silver, or all",
+        help="Step to execute: quality, encode, silver, model, consolidated, or all",
     )
     parser.add_argument("--catalog", default=None, help="Override catalog name")
     parser.add_argument("--schema", default=None, help="Override schema name")
@@ -38,6 +39,10 @@ def main():
         encoder.execution_silver_table()
 
     if args.step in ["model", "all"]:
+        model = XGBoostModel()
+        model.run()
+
+    if args.step in ["consolidated", "all"]:
         model = XGBoostModel()
         model.run()
 
