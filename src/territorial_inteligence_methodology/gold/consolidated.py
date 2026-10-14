@@ -1,6 +1,6 @@
 from territorial_inteligence_methodology.bronze.config import Config
 from territorial_inteligence_methodology.utils.sql_executor import SqlExecutor
-
+from datetime import datetime
 
 class Consolidated:
   
@@ -14,7 +14,7 @@ class Consolidated:
         self.silver_table = self.config.TABLE_SILVER_NAME
         self.rate_table = 'hurtos_personas_consolidado'
         self.gold_table = 'hurtos_personas_gold'
-        self.anio =2025
+        self.anio = datetime.now().year 
 
     def generate_threshold_table(self):
         tabla_consolidado =f"{self.catalog}.{self.schema}.{self.consolidated_table}"
@@ -28,7 +28,7 @@ class Consolidated:
             WITH calendario AS (
             SELECT DISTINCT anio, mes
             FROM {silver_table}
-            WHERE anio BETWEEN 2021 AND 2024
+            WHERE anio BETWEEN 2021 AND {(self.anio-1)}
         ),
         municipios AS (
             SELECT codigo_municipio, MAX(pob_dane_2025) AS pob_dane_2025
@@ -81,6 +81,7 @@ class Consolidated:
 
         rate = f"{self.catalog}.{self.schema}.{self.rate_table}"
         prediction = f"{self.catalog}.{self.schema}.{self.prediction_table}"
+        prediction_forecast = f"{self.catalog}.{self.schema}.hurto_personas_forecast"
         silver = f"{self.catalog}.{self.schema}.{self.silver_table}"
         consolidado = f"{self.catalog}.{self.schema}.{self.consolidated_table}"
         threshold =f"{self.catalog}.{self.schema}.thresholds"
@@ -102,7 +103,14 @@ class Consolidated:
                 INNER JOIN {consolidado} c
                     ON a.codigo_dane = c.codigo_municipio
                 WHERE a.anio >= {self.anio}
-            )
+            ),
+            predictions AS (
+                SELECT municipio,codigo_dane,departamento,mes,anio,tasa_predicha
+                FROM {prediction}
+                UNION ALL
+                SELECT municipio,codigo_dane,departamento,mes,anio,tasa_predicha
+                FROM {prediction_forecast}
+                )
             SELECT
                 p.municipio,
                 p.codigo_dane,
@@ -136,13 +144,13 @@ class Consolidated:
             END AS nivel_riesgo_predicho,
                 t.p_25,
                 t.p_75
-            FROM {prediction} p
+            FROM predictions p
             LEFT JOIN real_{self.anio} r
                 ON CAST(p.codigo_dane AS STRING) = CAST(r.codigo_dane AS STRING)
                 AND CAST(p.mes AS INT)  = CAST(r.mes AS INT)
                 AND CAST(p.anio AS INT) = CAST(r.anio AS INT)
             LEFT JOIN {threshold} t 
-            ON LPAD(CAST(p.codigo_dane AS STRING), 5, '0') = LPAD(CAST(t.codigo_dane AS STRING), 5, '0')
+            ON p.codigo_dane = t.codigo_dane
 
         """
     def generate_gold_table(self):

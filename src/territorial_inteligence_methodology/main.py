@@ -41,10 +41,11 @@ def main():
     if args.step in ["model", "all"]:
         model = XGBoostModel()
         model.run()
+        model.run_forecast()
 
     if args.step in ["consolidated", "all"]:
-        model = XGBoostModel()
-        model.run()
+        consolidated = Consolidated()
+        consolidated.run()
 
 
 if __name__ == "__main__":
