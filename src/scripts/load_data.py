@@ -1,3 +1,4 @@
+import argparse
 import re
 import unicodedata
 from pathlib import Path
@@ -19,11 +20,15 @@ class DataLoader:
         self.data_dir = Path("data")
 
     def normalize_column_name(self, name: str) -> str:
+        name = str(name)  # headers numericos del excel llegan como int (p.ej. 2020)
         name = unicodedata.normalize("NFD", name)
         name = "".join(c for c in name if unicodedata.category(c) != "Mn")
         name = name.lower()
         name = re.sub(r"[^a-z0-9]+", "_", name)
-        return name.strip("_")
+        name = name.strip("_")
+        if name.isdigit():
+            name = f"pob_{name}"  # anios como columna -> pob_2020 (evita backticks en cada SQL)
+        return name
 
     def ensure_catalog(self):
         catalog_name = self.config.CATALOG
@@ -144,12 +149,12 @@ class DataLoader:
         print(f"  Validation: {result['data']}")
         return result
 
-    def load_file(self, file_path: Path):
+    def load_file(self, file_path: Path, tabla: str = None):
         print(f"\nProcessing: {file_path.name}")
 
         parquet_path = self.convert_to_parquet(file_path)
         volume_path = self.upload_to_volume(parquet_path)
-        table_name = file_path.stem.lower()
+        table_name = tabla or file_path.stem.lower()
 
         self.create_table(volume_path, table_name)
         self.validate_table(table_name)
@@ -173,6 +178,15 @@ class DataLoader:
             return
 
         print(f"Found {len(files)} files: {[f.name for f in files]}")
+        print("WARNING: run() crea o REEMPLAZA la tabla de cada archivo (CREATE OR REPLACE)")
+
+        stems = {}
+        for f in files:
+            stems.setdefault(f.stem, []).append(f.name)
+        repetidos = {k: v for k, v in stems.items() if len(v) > 1}
+        if repetidos:
+            print(f"WARNING: mismo nombre en varios formatos {repetidos}: "
+                  f"el ultimo en orden alfabetico sobrescribe la tabla (puede ser mas viejo)")
 
         for file_path in files:
             self.load_file(file_path)
@@ -183,5 +197,14 @@ class DataLoader:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Carga archivos de data/ a tablas Delta")
+    parser.add_argument("archivo", nargs="?", default=None,
+                        help="Archivo puntual a cargar (default: TODOS los de data/)")
+    parser.add_argument("--tabla", default=None, help="Tabla destino (default: nombre del archivo)")
+    args = parser.parse_args()
+
     loader = DataLoader()
-    loader.run()
+    if args.archivo:
+        loader.load_file(Path(args.archivo), tabla=args.tabla)
+    else:
+        loader.run()

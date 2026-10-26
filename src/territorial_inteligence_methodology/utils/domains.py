@@ -132,6 +132,7 @@ WITH agregacion as (
                                     s.anio,
                                     s.mes,
                                     a.total_tematica,
+                                    COALESCE(a.total_tematica, 0) AS total_mes,
                                     a.tematica_zona_urbana,
                                     a.tematica_zona_rural,
                                     a.tematica_zona_otras,
@@ -189,75 +190,46 @@ WITH agregacion as (
     SELECT
         c.*,
 
-        LAG(total_tematica, 1) OVER w AS total_lag_1,
-        LAG(total_tematica, 2) OVER w AS total_lag_2,
-        LAG(total_tematica, 3) OVER w AS total_lag_3,
-        LAG(total_tematica, 4) OVER w AS total_lag_4,
-        LAG(total_tematica, 5) OVER w AS total_lag_5,
-        LAG(total_tematica, 6) OVER w AS total_lag_6,
-        LAG(total_tematica, 12) OVER w AS total_lag_12,
-
-        COUNT(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
+        LAG(total_mes, 1) OVER w AS total_lag_1,
+        LAG(total_mes, 2) OVER w AS total_lag_2,
+        LAG(total_mes, 3) OVER w AS total_lag_3,
+        LAG(total_mes, 4) OVER w AS total_lag_4,
+        LAG(total_mes, 5) OVER w AS total_lag_5,
+        LAG(total_mes, 6) OVER w AS total_lag_6,
+        LAG(total_mes, 12) OVER w AS total_lag_12,
+        AVG(total_mes) OVER (
+            PARTITION BY codigo_dane ORDER BY anio, mes
             ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING
-        ) AS n_obs_3,
-
-        COUNT(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
+        ) AS media_3_raw,
+        AVG(total_mes) OVER (
+            PARTITION BY codigo_dane ORDER BY anio, mes
             ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING
-        ) AS n_obs_6,
-
-        COUNT(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
+        ) AS media_6_raw,
+        AVG(total_mes) OVER (
+            PARTITION BY codigo_dane ORDER BY anio, mes
             ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING
-        ) AS n_obs_12,
-
+        ) AS media_12_raw,
+        MAX(total_mes) OVER (
+            PARTITION BY codigo_dane ORDER BY anio, mes
+            ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING
+        ) AS max_12_meses,
         COUNT(total_tematica) OVER (
             PARTITION BY codigo_dane
         ) AS historia_meses,
-
-        AVG(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
-            ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING
-        ) AS media_3_raw,
-
-        AVG(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
-            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING
-        ) AS media_6_raw,
-
-        AVG(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
-            ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING
-        ) AS media_12_raw,
-
-        MAX(total_tematica) OVER (
-            PARTITION BY codigo_dane
-            ORDER BY anio, mes
-            ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING
-        ) AS max_12_meses,
-
         CASE
-            WHEN LAG(total_tematica, 1) OVER w > 0
-            THEN (total_tematica - LAG(total_tematica, 1) OVER w)
-                 / LAG(total_tematica, 1) OVER w * 100
-            ELSE NULL
+            WHEN LAG(total_mes, 1) OVER w > 0
+            THEN (total_mes - LAG(total_mes, 1) OVER w)
+                 / LAG(total_mes, 1) OVER w * 100
         END AS crecimiento_intermensual,
 
         CASE
-            WHEN LAG(total_tematica, 12) OVER w > 0
-            THEN (total_tematica - LAG(total_tematica, 12) OVER w)
-                 / LAG(total_tematica, 12) OVER w * 100
-            ELSE NULL
+            WHEN LAG(total_mes, 12) OVER w > 0
+            THEN (total_mes - LAG(total_mes, 12) OVER w)
+                 / LAG(total_mes, 12) OVER w * 100
         END AS crecimiento_interanual,
-        total_tematica - LAG(total_tematica, 1) OVER w AS max_mes_anterior,
-        total_tematica - LAG(total_tematica, 12) OVER w AS max_anio_anterior,
+
+        total_mes - LAG(total_mes, 1) OVER w AS max_mes_anterior,
+        total_mes - LAG(total_mes, 12) OVER w AS max_anio_anterior,
 
         LAG(pct_zona_urbana, 1) OVER w
         AS pct_zona_urbana_lag_1,
@@ -297,25 +269,26 @@ WITH agregacion as (
     features AS (
     SELECT
         t.*,
+        media_3_raw  AS media_movil_3_meses,
+        media_6_raw  AS media_movil_6_meses,
+        media_12_raw AS media_movil_12_meses,
+        COUNT(total_tematica) OVER (
+            PARTITION BY codigo_dane
+            ORDER BY anio, mes
+            ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING
+        ) AS n_obs_3,
 
-        CASE
-            WHEN n_obs_3 = 3
-            THEN media_3_raw
-            ELSE NULL
-        END AS media_movil_3_meses,
+        COUNT(total_tematica) OVER (
+            PARTITION BY codigo_dane
+            ORDER BY anio, mes
+            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING
+        ) AS n_obs_6,
 
-        CASE
-            WHEN n_obs_6 = 6
-            THEN media_6_raw
-            ELSE NULL
-        END AS media_movil_6_meses,
-
-        CASE
-            WHEN n_obs_12 = 12
-            THEN media_12_raw
-            ELSE NULL
-        END AS media_movil_12_meses,
-
+        COUNT(total_tematica) OVER (
+            PARTITION BY codigo_dane
+            ORDER BY anio, mes
+            ROWS BETWEEN 12 PRECEDING AND 1 PRECEDING
+        ) AS n_obs_12,
         CASE
             WHEN n_obs_3 < 3 THEN 1
             ELSE 0

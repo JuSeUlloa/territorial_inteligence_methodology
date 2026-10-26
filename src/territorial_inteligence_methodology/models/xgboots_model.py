@@ -75,6 +75,10 @@ class XGBoostModel:
         'log_pob_dane'
     ]
 
+    # e^-3 = 5%: si un municipio se espera ~3 casos/mes, un mes en cero es plausible.
+    # Si se esperan mas, un mes sin registros es deficit de dato, no un cero.
+    LAMBDA_MAX_CERO_PLAUSIBLE = 3.0
+
     CONSOLIDATED_FEATURES = NUM_VARS_CONSOLIDATED_DATA
 
     FEATURES = NUM_VARS_SILVER + NUM_VARS_CONSOLIDATED_DATA + DERIVED_FEATURES
@@ -117,23 +121,43 @@ class XGBoostModel:
             f"ON a.codigo_dane = c.codigo_municipio"
         )
 
-    def build_train_query(self):
-        train_end_year = getattr(
+    def build_train_query(self, year=None, anio_exacto=False):
+        year = year or getattr(
             self,
             "train_end_year",
             self.evaluation_year - 1,
         )
+        ventana = getattr(self, "train_end_year", self.evaluation_year - 1)
+        cond_anio = (
+            f"a.anio = {year}" if anio_exacto
+            else f"a.anio BETWEEN 2021 AND {year}"
+        )
         return f"""
+            WITH historico AS (
+                SELECT
+                    a.codigo_dane,
+                    SUM(a.total_tematica) AS casos_hist,
+                    COUNT(*) AS meses_ventana
+                FROM {self.catalog}.{self.schema}.{self.table_silver} a
+                WHERE a.anio BETWEEN 2021 AND {ventana}
+                GROUP BY a.codigo_dane
+            )
             SELECT
                    {self.SILVER_ID_COLUMNS},
                    {self.SILVER_COLUMNS},
                    {self.CONSOLIDATED_DATA_COLUMNS},
-                   (a.total_tematica / c.pob_dane_2025) * 100000 AS target
-            {self._base_from()}
-             WHERE a.anio BETWEEN 2021 AND {train_end_year}
-             AND a.hay_observacion = 1
-             AND a.total_tematica IS NOT NULL
+                   (COALESCE(a.total_tematica, 0) / c.pob_dane_2025) * 100000 AS target
+            FROM {self.catalog}.{self.schema}.{self.table_silver} a
+            INNER JOIN {self.catalog}.{self.schema}.{self.consolidated_table} c
+                ON a.codigo_dane = c.codigo_municipio
+            LEFT JOIN historico h ON a.codigo_dane = h.codigo_dane
+             WHERE {cond_anio}
              AND c.pob_dane_2025 > 0
+             AND (
+                    a.total_tematica IS NOT NULL
+                 OR COALESCE(h.casos_hist, 0) / NULLIF(h.meses_ventana, 0)
+                    <= {self.LAMBDA_MAX_CERO_PLAUSIBLE}
+             )
          """
 
     def build_test_query(self, test_year=None):
@@ -144,8 +168,7 @@ class XGBoostModel:
                    {self.SILVER_COLUMNS},
                    {self.CONSOLIDATED_DATA_COLUMNS}
             {self._base_from()}
-             WHERE a.anio IN ({test_year})
-            AND a.hay_observacion = 1
+            WHERE a.anio IN ({test_year})
             AND c.pob_dane_2025 > 0
             ORDER BY a.departamento, a.municipio ASC
         """
@@ -168,17 +191,17 @@ class XGBoostModel:
                             PARTITION BY h.codigo_dane
                             ORDER BY h.anio DESC, h.mes DESC
                         ) AS rn,
-                        LAG(total_tematica, 5) OVER w AS lag_5,
-                        LAG(total_tematica, 11) OVER w AS lag_11,
-                        AVG(total_tematica) OVER (
+                         LAG(COALESCE(total_tematica,0), 5) OVER w AS lag_5,
+                        LAG(COALESCE(total_tematica,0), 11) OVER w AS lag_11,
+                        AVG(COALESCE(total_tematica,0)) OVER (
                             PARTITION BY codigo_dane ORDER BY anio, mes
                             ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
                         ) AS media_3_fwd,
-                        AVG(total_tematica) OVER (
+                        AVG(COALESCE(total_tematica,0)) OVER (
                             PARTITION BY codigo_dane ORDER BY anio, mes
                             ROWS BETWEEN 5 PRECEDING AND CURRENT ROW
                         ) AS media_6_fwd,
-                        AVG(total_tematica) OVER (
+                        AVG(COALESCE(total_tematica,0)) OVER (
                             PARTITION BY codigo_dane ORDER BY anio, mes
                             ROWS BETWEEN 11 PRECEDING AND CURRENT ROW
                         ) AS media_12_fwd,
@@ -210,17 +233,16 @@ class XGBoostModel:
                     (SELECT MAX(mes)+1 FROM {silver} WHERE anio = {year}) AS mes,
                     {year} AS anio,
                     -- Rezagos de la fila M (u = M-1, por eso el desplazamiento)
-                    u.total_tematica AS total_lag_1,
+                    COALESCE(u.total_tematica, 0) AS total_lag_1,
                     u.total_lag_1 AS total_lag_2,
                     u.total_lag_2 AS total_lag_3,
                     u.lag_5 AS total_lag_6,
                     u.lag_11 AS total_lag_12,
-                    CASE WHEN u.n_obs_3_fwd = 3
-                         THEN u.media_3_fwd END AS media_movil_3_meses,
-                    CASE WHEN u.n_obs_6_fwd = 6
-                         THEN u.media_6_fwd END AS media_movil_6_meses,
-                    CASE WHEN u.n_obs_12_fwd = 12
-                         THEN u.media_12_fwd END AS media_movil_12_meses,
+                     u.media_3_fwd AS media_movil_3_meses,
+                    u.media_6_fwd AS media_movil_6_meses,
+                    u.media_12_fwd AS media_movil_12_meses,
+                    COALESCE(u.total_tematica, 0) - COALESCE(u.total_lag_1, 0) AS max_mes_anterior,
+                    COALESCE(u.total_tematica, 0) - COALESCE(u.total_lag_12, 0) AS max_anio_anterior,
                     u.n_obs_3_fwd AS n_obs_3,
                     u.n_obs_6_fwd AS n_obs_6,
                     u.n_obs_12_fwd AS n_obs_12,
@@ -230,8 +252,6 @@ class XGBoostModel:
                     IF(u.n_obs_12_fwd < 12, 1, 0) AS historia_insuficiente_12,
                     u.crecimiento_intermensual,
                     u.crecimiento_interanual,
-                    u.total_tematica - u.total_lag_1 AS max_mes_anterior,
-                    u.total_tematica - u.total_lag_12 AS max_anio_anterior,
                     u.pct_zona_urbana AS pct_zona_urbana_lag_1,
                     u.pct_zona_rural AS pct_zona_rural_lag_1,
                     u.pct_arma_fuego AS pct_arma_fuego_lag_1,
@@ -265,7 +285,17 @@ class XGBoostModel:
             "Cargando datos de entrenamiento periodo "
             f"2021-{self.train_end_year} ..."
         )
-        return self.result_query_df(self.build_train_query())
+        data = []
+        for anio in range(2021, self.train_end_year + 1):
+            r = self.sql_executor.execute_sql_query(
+                self.catalog,
+                self.schema,
+                self.build_train_query(anio, anio_exacto=True),
+            )
+            data.extend(r["data"])
+            print(f"  {anio}: {len(r['data'])} filas")
+        print(f"Total train: {len(data)} filas")
+        return pd.DataFrame(data)
 
     def load_test_data(self, test_year=None):
         test_year = test_year or self.evaluation_year

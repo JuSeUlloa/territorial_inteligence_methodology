@@ -24,7 +24,8 @@ class Config:
         self.FILE_NAME = self._get_env('FILE_NAME', 'dataset_hurto_personas.parquet')
         self.PREDICTION_TABLE_NAME = self._get_env('PREDICTION_TABLE_NAME', 'hurto_personas_prediccion')
         self.CONSOLIDATED_TABLE_NAME = self._get_env('CONSOLIDATED_TABLE_NAME', 'consolidado')
-        
+        self.USE_THRESHOLDS_SHRINKAGE = self._get_env('USE_THRESHOLDS_SHRINKAGE', 'False').lower() == 'true'
+
         # Configuración APIs
         
         self.HOLIDAYS_API_URL = self._get_env(
