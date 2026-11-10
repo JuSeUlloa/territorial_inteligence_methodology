@@ -36,9 +36,31 @@ class Controller:
             "response": prediction_table,
         },200
     
-    def municipality_geo_table(self):
+    def prediction_municipality_table(self):
         try:
-           municipality= self.services.get_municipality_geo()
+           prediction_table= self.services.get_prediction_municipality_table()
+        except Exception as e:
+            return {"status":"degraded", "error": str(e)}, 503
+        return {
+            "status":"Ok",
+            "response": prediction_table,
+        },200
+    
+    def prediction_municipality_current_table(self):
+        try:
+           prediction_table= self.services.get_prediction_municipality_current_table()
+        except Exception as e:
+            return {"status":"degraded", "error": str(e)}, 503
+        return {
+            "status":"Ok",
+            "response": prediction_table,
+        },200
+    
+    def prediction_municipality_month(self, month:int):
+        try:
+           municipality= self.services.get_prediction_municipality_month_table(month)
+        except ValueError as e:
+            return {"status":"error", "error": str(e)}, 400
         except Exception as e:
             return {"status":"degraded", "error": str(e)}, 503
         return {
@@ -55,6 +77,7 @@ class Controller:
             "status":"Ok",
             "response": department,
         },200
+    
 
     def barrio_geo_table(self):
         try:
@@ -64,6 +87,16 @@ class Controller:
         return {
             "status":"Ok",
             "response": barrio,
+        },200
+   
+    def bronze_table(self):
+        try:
+           bronze= self.services.get_bronze_data()
+        except Exception as e:
+            return {"status":"degraded", "error": str(e)}, 503
+        return {
+            "status":"Ok",
+            "response": bronze,
         },200
 
     def municipalities_by_department_table(self, codigo_departamento: str):

@@ -246,6 +246,150 @@ La tabla `{catalog}.{schema}.thresholds` se genera a partir de las tasas histór
 
 Estos percentiles permiten clasificar el riesgo de cada municipio con una referencia local, en lugar de aplicar un único umbral nacional.
 
+## Carril Municipio (Nivel Barrio)
+
+Capa **independiente** del flujo nacional que agrega eventos a nivel de barrio
+para los municipios configurados (fase 1: `76109` Buenaventura). Es el insumo
+para disagregar la predicción municipal de XGBoost a barrios: **el modelo decide
+cuántos hurtos habrá; los shares históricos deciden dónde**. No existe un
+modelo ML barrial propio.
+
+### Por qué no pasa por el bronce nacional
+
+`BronzeEncoder` asigna códigos numéricos **alfabéticamente desde los `DISTINCT`
+de cada fuente**. Si el feed de barrios se codificara por separado, `URBANA`
+quedaría = 2 (en el nacional es = 3) y el `CASE` del silver leería mal los
+porcentajes **en silencio**. Por eso el carril:
+
+- **no** pasa por `BronzeEncoder`;
+- valida el léxico del feed como **subconjunto** del nacional (`utils/domains.py: COLUMNS_LEXICO`);
+- homologa **explícitamente** a los códigos alfabéticos verificados del bronce
+  nacional, con `TRIM`/`UPPER` (atrapa el `' FEMENINO'` con espacio inicial del feed):
+
+| Variable | Código → valor |
+|---|---|
+| `zona` | 1=OTRAS · 2=RURAL · 3=URBANA |
+| `armas_medios` | 1=- · 2=ARMA BLANCA / CORTOPUNZANTE · 3=ARMA DE FUEGO · 4=CONTUNDENTES · 5=ESCOPOLAMINA · 6=LLAVE MAESTRA · 7=MEDIOS DE COMUNICACIÓN... · 8=NO REPORTADO · 9=SIN EMPLEO DE ARMAS |
+| `genero` | 1=FEMENINO · 2=MASCULINO · 3=NO REPORTADO |
+| `agrupa_edad` | 2=ADULTOS · 3=JOVENES · 4=MENORES |
+
+### Tablas del carril
+
+| Tabla | Rol |
+|-------|-----|
+| `{schema}.hurto_personas_municipio` | Fuente cruda del feed (eventos con `id_barrio`) |
+| `{schema}.poblacion_municipio` | Población por barrio (cargada con `src/scripts/load_data.py`) |
+| `{schema}.hurto_personas_bronce_municipio` | Salida: eventos homologados a la estructura del bronce nacional + llaves del carril |
+| `{schema}.municipio_barrios_geo` | Geometrías de barrios (mapa/ficha) |
+
+**Granularidad:** 1 fila = 1 evento (igual que `hurtos_personas_bronce`), con
+las llaves del carril al final: `id_barrio` y `barrio`. El `id_barrio` es
+`MD5(TRIM(UPPER(barrio)))` y **colisiona entre municipios** (hay barrios con
+el mismo nombre en distintos municipios) — la llave efectiva es **compuesta**
+(municipio + barrio).
+
+### Creación de la tabla (SQL directo)
+
+Fase 1 sin código mantenido: la tabla se crea con CTAS desde el editor de SQL
+de Databricks. Reglas de homologación:
+
+- **Columna inexistente en el feed** (`departamento`, `clase_sitio`, `dia`) → `NULL`.
+- **Valor fuera del léxico** → `0` (0 no es código nacional; el `CASE` del silver
+  lo ignora igual que ignora el `-` nacional).
+- `tematica`: `'HURTO PERSONAS'` (feed) → `'HURTO A PERSONAS'` (nacional).
+- Buckets de edad: menores `< 18` → 4 · jóvenes `18-28` → 3 · adultos `> 28` → 2.
+- Si se agregan municipios al carril, basta un feed con `codigo_divipola`
+  correcto y re-ejecutar el CTAS.
+
+```sql
+CREATE OR REPLACE TABLE workspace.territorial_inteligence.hurto_personas_bronce_municipio
+USING DELTA
+AS
+
+SELECT
+    CASE WHEN TRIM(UPPER(tematica)) = 'HURTO PERSONAS'
+         THEN 'HURTO A PERSONAS' ELSE TRIM(UPPER(tematica)) END AS tematica,
+    anio  AS anio,
+    NULL AS departamento,
+    codigo_divipola as codigo_dane,
+    municipio AS municipio,
+    CAST(NULL AS STRING) AS clase_sitio,
+    CAST(NULL AS STRING) AS dia,
+    CAST(cantidad AS BIGINT) AS cantidad,
+    CASE SUBSTR(LOWER(TRIM(mes)), 1, 3)
+        WHEN 'ene' THEN 1 WHEN 'feb' THEN 2 WHEN 'mar' THEN 3 WHEN 'abr' THEN 4
+        WHEN 'may' THEN 5 WHEN 'jun' THEN 6 WHEN 'jul' THEN 7 WHEN 'ago' THEN 8
+        WHEN 'sep' THEN 9 WHEN 'oct' THEN 10 WHEN 'nov' THEN 11 WHEN 'dic' THEN 12
+    END AS mes,
+    CAST(CASE TRIM(UPPER(genero))
+        WHEN 'MASCULINO' THEN 2 WHEN 'FEMENINO' THEN 1 WHEN 'NO REPORTADO' THEN 3
+        ELSE 0 END AS INT) AS genero,
+    CAST(CASE TRIM(UPPER(zona))
+        WHEN 'URBANA' THEN 3 WHEN 'RURAL' THEN 2 WHEN 'OTRAS' THEN 1
+        ELSE 0 END AS INT) AS zona,
+    CAST(CASE TRIM(UPPER(armas_medios))
+        WHEN 'ARMA DE FUEGO' THEN 3
+        WHEN 'ARMA BLANCA / CORTOPUNZANTE' THEN 2
+        WHEN 'CONTUNDENTES' THEN 4
+        WHEN 'ESCOPOLAMINA' THEN 5
+        WHEN 'NO REPORTADO' THEN 8
+        WHEN 'SIN EMPLEO DE ARMAS' THEN 9
+        ELSE 0 END AS INT) AS armas_medios,
+    CAST(CASE
+        WHEN TRY_CAST(TRIM(edad) AS INT) IS NULL               THEN 0
+        WHEN TRY_CAST(TRIM(edad) AS INT) < 18                  THEN 4
+        WHEN TRY_CAST(TRIM(edad) AS INT) <= 28                 THEN 3
+        ELSE 2
+    END AS INT) AS agrupa_edad,
+    TRIM(id_barrio) AS id_barrio,
+    TRIM(UPPER(barrio)) AS barrio
+FROM workspace.territorial_inteligence.hurto_personas_municipio
+WHERE id_barrio IS NOT NULL AND TRIM(id_barrio) <> ''
+```
+
+### Validaciones post-creación
+
+```sql
+-- (a) Estructura: mismas columnas del bronce nacional + llaves del carril
+DESCRIBE workspace.territorial_inteligence.hurto_personas_bronce_municipio
+
+-- (b) Valores caídos en 0 (esperado 0 en las 4: el léxico del feed es subconjunto)
+SELECT
+    SUM(CASE WHEN genero = 0 THEN 1 ELSE 0 END)        AS genero_cero,
+    SUM(CASE WHEN zona = 0 THEN 1 ELSE 0 END)          AS zona_cero,
+    SUM(CASE WHEN armas_medios = 0 THEN 1 ELSE 0 END)  AS armas_cero,
+    SUM(CASE WHEN agrupa_edad = 0 THEN 1 ELSE 0 END)   AS edad_cero
+FROM workspace.territorial_inteligence.hurto_personas_bronce_municipio
+
+-- (c) Conservación y consistencia
+SELECT COUNT(*) AS filas, SUM(cantidad) AS eventos,
+       COUNT(DISTINCT CONCAT(CAST(codigo_dane AS STRING), '-', id_barrio)) AS barrios,
+       COUNT(DISTINCT tematica) AS tematicas,
+       SUM(CASE WHEN mes IS NULL THEN 1 ELSE 0 END) AS mes_null
+FROM workspace.territorial_inteligence.hurto_personas_bronce_municipio
+
+-- (d) Brecha sin barrio en el feed crudo (transparencia)
+SELECT CAST(codigo_divipola AS STRING) AS codigo_dane, COUNT(*) AS sin_barrio
+FROM workspace.territorial_inteligence.hurto_personas_municipio
+WHERE id_barrio IS NULL OR TRIM(id_barrio) = ''
+GROUP BY CAST(codigo_divipola AS STRING)
+```
+
+| Query | Esperado (fase 1, Buenaventura) |
+|-------|--------------------------------|
+| (a) | `tematica, anio, departamento, codigo_dane, municipio, clase_sitio, dia, cantidad, mes, genero, zona, armas_medios, agrupa_edad, id_barrio, barrio` |
+| (b) | **0 × 4** (si da >0, hay una etiqueta nueva en el feed) |
+| (c) | filas = eventos = **3,531** · barrios 203 · tematicas 1 · mes_null 0 |
+| (d) | ~1,438 eventos sin barrio (quedan fuera del carril) |
+
+### Limitaciones de datos
+
+- El feed `hurto_personas_municipio` cubre **2020-2024** (sin 2025-2026);
+  cualquier predicción disagregada arrastra ese desfase, que se expone en la
+  salida (`meses_desfase`).
+- Solo el 35.8% de los eventos cruzan con `poblacion_municipio` (barrios con
+  población conocida); los micro-barrios sin población quedan sin tasa.
+
 
 
 ## Ejecución del Pipeline
@@ -290,20 +434,79 @@ uv run python -m territorial_inteligence_methodology.main --step all \
   --schema mi_usuario
 ```
 
+## API de consulta (Flask sobre el SQL warehouse de Databricks)
+
 ### Ejecución en Databricks
 
 ```bash
 # Deploy al workspace (desarrollo)
 databricks bundle deploy --target dev
 
-# Ejecutar el job
-databricks bundle run
+# Ejecutar el job (todas las tasks: fase A + fase B)
+databricks bundle run territorial_inteligence_pipeline -t dev
 
 # Deploy a producción
 databricks bundle deploy --target prod
 ```
 
+## API de consulta (Flask sobre el SQL warehouse de Databricks)
+
+API REST en `src/territorial_inteligence_methodology/app/` que expone las
+salidas gold de las dos fases y las geometrías. Cada endpoint ejecuta SQL
+contra el warehouse (`workspace.territorial_inteligence`) vía `SqlExecutor`.
+Detalle completo en `tecnical-analisis.md`, §8.6.
+
+```bash
+# Arranque (producción: gunicorn · dev: API_DEBUG=true)
+uv run --frozen python src/scripts/run_api.py
+# o con el wheel instalado:
+uv run --frozen api
+```
+
+Base: `http://localhost:3300/api/territorial_intelligence` — puerto `$PORT` (default 3300).
+
+| Ruta | Devuelve |
+|---|---|
+| `/gold`, `/gold/<mes>` | consolidado histórico nacional pred/real (fase A) |
+| `/prediction` | predicción del último mes (fase A) |
+| `/prediction/neighborhood[ /current /<mes>]` | gold barrial Buenaventura 2020-2024 + forecast (fase B) |
+| `/department` · `/neighborhood` · `/department/<cod>/municipality` · `/municipality/<codigo_dane>` | GeoJSON de territorios |
+
+Los 10 endpoints fueron smoke-testeados contra el workspace el 2026-10-28 (200 OK).
+
+### Despliegue sobre Databricks (Databricks App)
+
+La API corre como **Databricks App** en el workspace
+(https://territorial-api-7474655446021466.aws.databricksapps.com). Para
+actualizarla tras cambiar código:
+
+```bash
+bash src/scripts/build_api_app.sh
+rm -rf /tmp/api-src && mkdir -p /tmp/api-src && rsync -a apps/territorial-api/ /tmp/api-src/
+databricks workspace import-dir /tmp/api-src \
+  /Workspace/Users/juan.ulloa@usantotomas.edu.co/territorial-api-src \
+  --overwrite --profile DEFAULT
+databricks apps deploy territorial-api --auto-approve --mode SNAPSHOT \
+  --source-code-path /Workspace/Users/juan.ulloa@usantotomas.edu.co/territorial-api-src \
+  --profile DEFAULT
+```
+
+Ver detalle y pendientes en `tecnical-analisis.md`, §8.6.
+
+### Frontend público (Angular/Vercel)
+
+Existe un **proxy serverless** en `api-public/` (Vercel Function) que consulta
+el SQL warehouse con un service principal M2M — sin login de Databricks. Copiar
+`api-public/vercel/api/dbx.mjs` + `vercel.json` al proyecto Angular y definir
+los env de Vercel. Instrucciones: `api-public/README.md`.
+
 ## Datos
+
+### Diccionario de variables
+
+El detalle completo de las variables que genera Silver y consume el modelo
+(bloques: autorregresivo, cobertura, momentum, composición, estructurales y
+target) está en **`diccionario_datos.md`**.
 
 ### Fuente
 
@@ -324,6 +527,10 @@ databricks bundle deploy --target prod
 | `{schema}.municipios_geo` | Geometrías de municipios para mapas coropléticos |
 | `{schema}.departamentos_geo` | Geometrías de departamentos para mapas coropléticos |
 | `{schema}.holidays` | Festivos nacionales de Colombia por fecha |
+| `{schema}.hurto_personas_municipio` | Feed crudo de hurtos a nivel barrial (fuente del carril municipio) |
+| `{schema}.hurto_personas_bronce_municipio` | Carril municipio: barrio × mes con composición del hecho |
+| `{schema}.poblacion_municipio` | Población por barrio (cargada con `load_data.py`) |
+| `{schema}.municipio_barrios_geo` | Geometrías de barrios por municipio |
 
 ### Festividades
 

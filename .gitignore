@@ -18,3 +18,5 @@ resources/
 databricks.yml
 
 .opencode/*
+apps/territorial-api/src/
+src/scripts/build_api_app.sh

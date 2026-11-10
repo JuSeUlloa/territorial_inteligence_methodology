@@ -18,15 +18,17 @@ class Config:
         self.CATALOG = self._get_env('CATALOG', 'workspace')
         self.SCHEMA = self._get_env('SCHEMA', 'territorial_inteligence')
         self.VOLUME_NAME = self._get_env('VOLUME_NAME', 'hurto_personas')
-        self.TABLE_NAME = self._get_env('TABLE_NAME', 'hurto_personas')
-        self.TABLE_BRONZE_NAME = self._get_env('BRONZE_TABLE_NAME', 'hurto_personas_bronce')
-        self.TABLE_SILVER_NAME = self._get_env('SILVER_TABLE_NAME', 'hurto_personas_silver')
+        self.TABLE_NAME = self._get_env('TABLE_NAME', 'hurtos_personas')
+        self.TABLE_BRONZE_NAME = self._get_env('BRONZE_TABLE_NAME', 'hurtos_personas_bronce')
+        self.TABLE_SILVER_NAME = self._get_env('SILVER_TABLE_NAME', 'hurtos_personas_silver')
         self.FILE_NAME = self._get_env('FILE_NAME', 'dataset_hurto_personas.parquet')
         self.PREDICTION_TABLE_NAME = self._get_env('PREDICTION_TABLE_NAME', 'hurto_personas_prediccion')
         self.CONSOLIDATED_TABLE_NAME = self._get_env('CONSOLIDATED_TABLE_NAME', 'consolidado')
         self.USE_THRESHOLDS_SHRINKAGE = self._get_env('USE_THRESHOLDS_SHRINKAGE', 'False').lower() == 'true'
-
-        # Configuración APIs
+        self.TABLE_BRONZE_MUNICIPALITY_NAME = self._get_env('TABLE_BRONZE_MUNICIPALITY_NAME', 'hurto_personas_bronce_municipio')
+        self.TABLE_SILVER_MUNICIPALITY_NAME = self._get_env('TABLE_SILVER_MUNICIPALITY_NAME', 'hurto_personas_silver_municipio')
+        self.POPULATION_MUNICIPALITY_NAME = self._get_env('POPULATION_MUNICIPALITY_NAME', 'poblacion_municipio')
+        self.MUNICIPIOS_BARRIOS = self._get_env('MUNICIPIOS_BARRIOS', '76109').split(',')
         
         self.HOLIDAYS_API_URL = self._get_env(
             'HOLIDAYS_API_URL',

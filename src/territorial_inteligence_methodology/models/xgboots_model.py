@@ -241,8 +241,21 @@ class XGBoostModel:
                      u.media_3_fwd AS media_movil_3_meses,
                     u.media_6_fwd AS media_movil_6_meses,
                     u.media_12_fwd AS media_movil_12_meses,
-                    COALESCE(u.total_tematica, 0) - COALESCE(u.total_lag_1, 0) AS max_mes_anterior,
-                    COALESCE(u.total_tematica, 0) - COALESCE(u.total_lag_12, 0) AS max_anio_anterior,
+                    -- FIX fuga (A3) + desfasaje (A2): misma fórmula de train, evaluada en t=M
+                    -- con los rezagos disponibles (u.total = LAG1 de M; u.total_lag_1 = LAG2 de M)
+                    CASE
+                        WHEN u.total_lag_1 > 0
+                        THEN (u.total_tematica / u.total_lag_1 - 1) * 100
+                        ELSE NULL
+                    END AS crecimiento_intermensual,
+                    CASE
+                        WHEN u.lag_11 > 0
+                        THEN (u.total_tematica / u.lag_11 - 1) * 100
+                        ELSE NULL
+                    END AS crecimiento_interanual,
+                    CAST(u.total_tematica - u.total_lag_1 AS INT) AS max_mes_anterior,
+                    -- anti desfasaje (A2): total de t-12 es u.lag_11 (no u.lag_12)
+                    CAST(u.total_tematica - u.lag_11 AS INT) AS max_anio_anterior,
                     u.n_obs_3_fwd AS n_obs_3,
                     u.n_obs_6_fwd AS n_obs_6,
                     u.n_obs_12_fwd AS n_obs_12,
@@ -250,8 +263,6 @@ class XGBoostModel:
                     IF(u.n_obs_3_fwd < 3, 1, 0) AS historia_insuficiente_3,
                     IF(u.n_obs_6_fwd < 6, 1, 0) AS historia_insuficiente_6,
                     IF(u.n_obs_12_fwd < 12, 1, 0) AS historia_insuficiente_12,
-                    u.crecimiento_intermensual,
-                    u.crecimiento_interanual,
                     u.pct_zona_urbana AS pct_zona_urbana_lag_1,
                     u.pct_zona_rural AS pct_zona_rural_lag_1,
                     u.pct_arma_fuego AS pct_arma_fuego_lag_1,
@@ -422,6 +433,12 @@ class XGBoostModel:
         os.makedirs(self.model_dir, exist_ok=True)
         path = os.path.join(self.model_dir, name)
         joblib.dump(self.model, path)
+        # persistir también en volumen UC compartido entre tasks
+        try:
+            from territorial_inteligence_methodology.utils.model_store import ModelStore
+            ModelStore().save(self.model, name)
+        except Exception as e:
+            print(f"  WARNING: no se pudo subir el pkl al volumen UC: {e}")
         print(f"\nModelo guardado en: {path}")
         return path
 

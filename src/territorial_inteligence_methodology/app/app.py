@@ -17,8 +17,6 @@ class APP:
         app = Flask(__name__)
         CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-        # el controller vive en extensions: las vistas (que no reciben self)
-        # lo encuentran via current_app
         app.extensions["controller"] = self.routes.controller
         app.register_blueprint(self.routes.bq, url_prefix="/api/territorial_intelligence")
 
@@ -35,12 +33,19 @@ class APP:
 
     def run(self):
         app = self.create_app()
-        app.run(host="0.0.0.0", port=int(os.getenv("PORT", "3300")))
+        
+        port = os.getenv("DATABRICKS_APP_PORT") or os.getenv("PORT", "3300")
+        app.run(host="0.0.0.0", port=int(port))
 
 
-app = APP().create_app()   # target de gunicorn: ...app.app:app
+app = APP().create_app()
+
+
+def main():
+    debug = os.getenv("API_DEBUG", "false").lower() == "true"
+    port = os.getenv("DATABRICKS_APP_PORT") or os.getenv("PORT", "3300")
+    app.run(host="0.0.0.0", port=int(port), debug=debug)
 
 
 if __name__ == "__main__":
-    debug = os.getenv("API_DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "4500")), debug=debug)
+    main()

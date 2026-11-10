@@ -36,6 +36,7 @@ dev = [
 
 [project.scripts]
 main = "territorial_inteligence_methodology.main:main"
+api = "territorial_inteligence_methodology.app.app:main"
 
 [build-system]
 requires = ["hatchling"]

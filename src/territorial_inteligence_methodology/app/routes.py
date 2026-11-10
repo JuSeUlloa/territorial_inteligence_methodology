@@ -28,16 +28,35 @@ class Routes:
         payload, status_code = controller.prediction_table()
         return jsonify(payload), status_code
     
-    @bq.get("/municipality")
-    def get_municipality_table():
+    @bq.get("/prediction/neighborhood/current")
+    def get_prediction_municipality_current():
         controller = current_app.extensions["controller"]
-        payload, status_code = controller.municipality_geo_table()
+        payload, status_code = controller.prediction_municipality_current_table()
         return jsonify(payload), status_code
+    
+    @bq.get("/prediction/neighborhood")
+    def get_prediction_municipality():
+        controller = current_app.extensions["controller"]
+        payload, status_code = controller.prediction_municipality_table()
+        return jsonify(payload), status_code
+    
+    @bq.get("/prediction/neighborhood/<mes>")
+    def get_prediction_municipality_month(mes):
+        controller = current_app.extensions["controller"]
+        payload, status_code = controller.prediction_municipality_month(mes)
+        return jsonify(payload), status_code
+    
     
     @bq.get("/department")
     def get_department_table():
         controller = current_app.extensions["controller"]
         payload, status_code = controller.department_geo_table()
+        return jsonify(payload), status_code
+    
+    @bq.get("/bronze")
+    def get_bronze_table():
+        controller = current_app.extensions["controller"]
+        payload, status_code = controller.bronze_table()
         return jsonify(payload), status_code
 
     @bq.get("/neighborhood")

@@ -5,6 +5,8 @@ from territorial_inteligence_methodology.bronze.quality import Quality
 from territorial_inteligence_methodology.bronze.bronce import BronzeEncoder
 from territorial_inteligence_methodology.silver.silver import SilverEncoder
 from territorial_inteligence_methodology.models.xgboots_model import XGBoostModel
+from territorial_inteligence_methodology.models.municipality_test import MunicipalityModel
+
 from territorial_inteligence_methodology.gold.consolidated import Consolidated
 from territorial_inteligence_methodology.app.app import APP
 
@@ -16,7 +18,7 @@ def main():
     )
     parser.add_argument(
         "--step",
-        choices=["quality", "encode","silver", "model", "consolidated","api", "all"],
+        choices=["quality", "encode","silver", "model", "consolidated", "municipality","all"],
         default="all",
         help="Step to execute: quality, encode, silver, model, asi consolidated, or all",
     )
@@ -37,7 +39,7 @@ def main():
 
     if args.step in ["silver", "all"]:
         encoder = SilverEncoder()
-        encoder.execution_silver_table()
+        encoder.execution_silver_table(enable_municipality=True)
 
     if args.step in ["model", "all"]:
         model = XGBoostModel()
@@ -49,6 +51,10 @@ def main():
         consolidated.run_shrinkage(compute_in_python=False)
         consolidated.run()
     
+    if args.step in ["municipality", "all"]:
+        mum_model = MunicipalityModel()
+        mum_model.run()
+
     if args.step in ["api", "all"]:
         API = APP()
         API.run()

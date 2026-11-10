@@ -57,7 +57,6 @@ class  HistogramaError:
 
         fig, (ax_hist, ax_scatter) = plt.subplots(1, 2, figsize=(16, 6))
 
-        # --- Histograma del error ---
         ax_hist.hist(errors, bins=bins, color="steelblue", edgecolor="white", alpha=0.85)
         ax_hist.axvline(0, color="black", linestyle="--", linewidth=1.5, label="Sin error (0)")
         ax_hist.axvline(avg, color="red", linestyle="-", linewidth=1.5, label=f"Media: {avg:.2f}")
@@ -80,7 +79,6 @@ class  HistogramaError:
         ax_hist.set_ylabel("Frecuencia")
         ax_hist.legend()
 
-        # --- Scatter tasa real vs tasa predicha ---
         ax_scatter.scatter(real, pred, alpha=0.4, s=18, color="steelblue", edgecolors="none")
         max_val = max(max(real), max(pred))
         ax_scatter.plot(

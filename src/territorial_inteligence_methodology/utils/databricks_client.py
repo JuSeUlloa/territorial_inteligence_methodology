@@ -1,3 +1,5 @@
+import os
+
 from databricks.sdk import WorkspaceClient
 
 
@@ -12,15 +14,18 @@ class DataBricksClient:
         return cls._instance
     
     def get_client(self) -> WorkspaceClient:
-        """Retorna la instancia singleton de WorkspaceClient."""
         if self._client is None:
             self._client = WorkspaceClient()
         return self._client
     
     def get_warehouse_id(self) -> str:
-        """Obtiene el primer warehouse disponible y lo inicia si está detenido."""
         if self._warehouse_id is not None:
             return self._warehouse_id
+        
+        env_warehouse = os.getenv('DATABRICKS_WAREHOUSE_ID', '')
+        if env_warehouse:
+            self._warehouse_id = env_warehouse
+            return env_warehouse
         
         client = self.get_client()
         warehouses = list(client.warehouses.list())

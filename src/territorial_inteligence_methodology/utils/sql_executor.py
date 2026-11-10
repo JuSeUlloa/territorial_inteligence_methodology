@@ -9,7 +9,6 @@ class SqlExecutor:
     
     def execute_sql_query(self, catalog_name: str, schema_name: str, query: str) -> dict:
 
-        #print(f'Executing SQL query: {query}')
         warehouse_id = DataBricksClient().get_warehouse_id()
         
         response = self.client.statement_execution.execute_statement(
